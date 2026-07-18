@@ -63,6 +63,47 @@ class TestVerdictWire(unittest.TestCase):
         self.assertNotIn("call", elev)       # not the nested ToolCall
         self.assertNotIn("args", elev)
 
+    # -- malformed elevation must raise WireError, never KeyError/TypeError --
+    #
+    # Callers are told WireError is the one exception to expect. A raw KeyError
+    # escaping from here would sail past a `except WireError` guard, and in a
+    # harness that swallows hook exceptions and proceeds (Hermes does exactly
+    # this) an unexpected exception type is an ALLOW. The exception type is a
+    # fail-closed property, not a cosmetic one.
+
+    def test_elevation_missing_required_field_raises_wire_error(self):
+        for missing in ("capability", "scope", "reason", "call_id"):
+            elevation = {"capability": "email:delete", "scope": {"id": 1},
+                         "reason": "why", "call_id": "c"}
+            del elevation[missing]
+            with self.subTest(missing=missing):
+                with self.assertRaises(WireError):
+                    verdict_from_wire({"decision": "hold", "reason": "r",
+                                       "elevation": elevation})
+
+    def test_elevation_with_wrong_field_types_raises_wire_error(self):
+        bad = [
+            {"capability": 1, "scope": {}, "reason": "r", "call_id": "c"},
+            {"capability": "c", "scope": "not-a-dict", "reason": "r", "call_id": "c"},
+            {"capability": "c", "scope": {}, "reason": None, "call_id": "c"},
+            {"capability": "c", "scope": {}, "reason": "r", "call_id": 42},
+        ]
+        for elevation in bad:
+            with self.subTest(elevation=elevation):
+                with self.assertRaises(WireError):
+                    verdict_from_wire({"decision": "hold", "elevation": elevation})
+
+    def test_elevation_that_is_not_an_object_raises_wire_error(self):
+        for elevation in ("string", 7, ["a"], True):
+            with self.subTest(elevation=elevation):
+                with self.assertRaises(WireError):
+                    verdict_from_wire({"decision": "hold", "elevation": elevation})
+
+    def test_null_elevation_is_still_fine(self):
+        v = verdict_from_wire({"decision": "deny", "reason": "r", "elevation": None})
+        self.assertIsNone(v.elevation)
+        self.assertEqual(v.decision, Decision.DENY)
+
 
 class TestEnvelope(unittest.TestCase):
     def test_request_and_response_carry_schema_version(self):

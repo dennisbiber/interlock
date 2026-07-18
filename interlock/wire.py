@@ -113,11 +113,21 @@ def verdict_from_wire(d: dict) -> Verdict:
     if e is not None:
         # Reconstruct a lightweight ElevationRequest; the nested call carries
         # only the call_id (the wire never had the rest).
+        #
+        # Every field is validated rather than indexed raw. A malformed
+        # elevation must surface as WireError — the one exception type callers
+        # are told to expect — so a fail-closed PEP catching WireError cannot be
+        # bypassed by a KeyError/TypeError escaping from here into a caller that
+        # treats an unexpected exception differently.
+        if not isinstance(e, dict):
+            raise WireError("field 'elevation' must be an object or null")
         elevation = ElevationRequest(
-            call=ToolCall(tool_name="", args={}, session_id="", call_id=e["call_id"]),
-            capability=e["capability"],
-            scope=e["scope"],
-            reason=e["reason"],
+            call=ToolCall(
+                tool_name="", args={}, session_id="", call_id=_req_str(e, "call_id")
+            ),
+            capability=_req_str(e, "capability"),
+            scope=_req_dict(e, "scope"),
+            reason=_req_str(e, "reason"),
         )
     try:
         decision = Decision(d["decision"])
