@@ -72,15 +72,27 @@ def running(pdp, tmp, max_body=service.DEFAULT_MAX_BODY):
         service._safe_unlink(sock_path)
 
 
+class TransportClosed(Exception):
+    """The server closed the connection before the exchange completed.
+
+    This is itself a FAIL-CLOSED outcome: a PEP maps any transport error to
+    BLOCK, so nothing executes. It is the expected result when the server
+    rejects an oversized body without draining it.
+    """
+
+
 def post(sock_path, envelope=None, raw=None):
     conn = _UDS(sock_path)
     body = raw if raw is not None else json.dumps(envelope)
     try:
-        conn.request("POST", "/evaluate", body=body,
-                     headers={"Content-Type": "application/json"})
-        resp = conn.getresponse()
-        status = resp.status
-        data = json.loads(resp.read().decode("utf-8"))
+        try:
+            conn.request("POST", "/evaluate", body=body,
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            status = resp.status
+            data = json.loads(resp.read().decode("utf-8"))
+        except (BrokenPipeError, ConnectionResetError) as exc:
+            raise TransportClosed() from exc
     finally:
         conn.close()
     return status, data
@@ -122,7 +134,15 @@ class TestFailClosed(unittest.TestCase):
             big = json.dumps({"schema_version": SCHEMA_VERSION,
                               "tool_call": {"tool_name": "x", "args": {"blob": "a" * 5000},
                                             "session_id": "s", "call_id": "c"}})
-            _, res = post(sock, raw=big)
+            # The server refuses to READ a body over max_body (it must not drain an
+            # unbounded body), answers DENY, then closes. Whether the client finishes
+            # writing before that close is a RACE -- so both outcomes are valid and
+            # both are fail-closed. What must never happen is an ALLOW.
+            try:
+                _, res = post(sock, raw=big)
+            except TransportClosed:
+                return  # connection closed under us => nothing executed
+            self.assertEqual(res["verdict"]["decision"], "deny")
             self.assertEqual(res["verdict"]["reason"], "malformed_request")
 
     def test_handler_exception_becomes_pdp_error(self):
