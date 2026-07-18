@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Keeps CI action pins current (there are no runtime deps to update).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Watches dev-only tooling declared in pyproject [dev].
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # The OpenClaw PEP package (Node built-ins only today, but future-proofs it).
+  - package-ecosystem: "npm"
+    directory: "/interlock/adapters/openclaw"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

@@ -1,0 +1,39 @@
+name: Adapter proposal
+description: Propose a PEP adapter for a new agent harness.
+labels: ["adapter"]
+body:
+  - type: input
+    id: harness
+    attributes:
+      label: Harness
+      description: Name + version (e.g. Hermes Agent 0.16, Claude Code, LangChain).
+    validations:
+      required: true
+  - type: input
+    id: hook
+    attributes:
+      label: Interception point
+      description: The pre-execution hook/middleware (e.g. pre_tool_call, PreToolUse, on_tool_start).
+    validations:
+      required: true
+  - type: dropdown
+    id: enforces
+    attributes:
+      label: Does the hook actually block execution?
+      description: Verified against a real install, not just the docs.
+      options:
+        - "Yes — a block return prevents the tool from running (verified)"
+        - "Unclear — needs verification"
+        - "No — observational only (would need a different enforcement point)"
+    validations:
+      required: true
+  - type: textarea
+    id: return-shape
+    attributes:
+      label: Return/block contract
+      description: How the hook signals block / allow / modify.
+  - type: textarea
+    id: silent-no-fire
+    attributes:
+      label: Silent-no-fire risk
+      description: Any known builds where the hook is registered but not called?
