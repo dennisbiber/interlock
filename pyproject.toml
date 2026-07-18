@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "interlock"
+version = "0.1.0"
+description = "A passive, deterministic policy-enforcement layer for agent tool calls (sudo-for-agents)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+keywords = ["ai-agents", "security", "policy-enforcement", "guardrails", "tool-calling"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Topic :: Security",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+
+# INVARIANT: runtime dependencies stay EMPTY. The PDP is stdlib-only. This is a
+# trust property for a security component and is enforced in CI
+# (scripts/check_no_runtime_deps.py). Dev/test tooling goes under [dev] below.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6", "mypy>=1.11"]
+
+[project.urls]
+Homepage = "https://github.com/dennisbiber/interlock"
+Issues = "https://github.com/dennisbiber/interlock/issues"
+
+[tool.setuptools.packages.find]
+include = ["interlock*"]
+exclude = ["tests*"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+# Lenient to start; tighten over time. CI runs mypy as advisory (non-blocking).
+warn_unused_ignores = false
+check_untyped_defs = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100

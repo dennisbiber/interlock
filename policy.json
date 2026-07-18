@@ -1,0 +1,28 @@
+{
+  "default_posture": "deny",
+  "passive_effects": ["read", "search", "list"],
+  "consequential_effects": ["fs:delete", "fs:write", "email:send", "payment", "net:egress"],
+  "tool_effects": {
+    "delete_email": "email:send",
+    "list_inbox": "read",
+    "search_web": "search"
+  },
+  "tool_scopes": {
+    "delete_email": ["id"]
+  },
+  "filters": ["RateLimiter", "GateKeeper"],
+  "elevation": {
+    "default": "HumanApprover",
+    "email:send": "HumanApprover"
+  },
+  "rate_limits": {
+    "_comment": "Counts ATTEMPTS per window, not approved actions: runs before elevation, so every attempt (even ones later denied/rejected) consumes budget. A per-effect limit is a HARD CEILING that caps even human-approved actions. default null = unlimited unless opted in. A post-elevation 'N approved actions' cap is deferred past v1.",
+    "window_seconds": 3600,
+    "key": "session_effect",
+    "default": null,
+    "per_effect": {
+      "email:send": 5,
+      "fs:delete": 10
+    }
+  }
+}

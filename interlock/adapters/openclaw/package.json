@@ -1,0 +1,10 @@
+{
+  "name": "interlock-openclaw-pep",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenClaw PEP for the interlock PDP: fail-closed unix-socket client, verdict mapping, hook liveness check.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
