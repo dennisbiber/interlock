@@ -1,0 +1,14 @@
+# Every change is reviewed by the maintainer. Combined with branch protection
+# (require review from Code Owners), this makes review mandatory on all PRs.
+* @dennisbiber
+
+# The security-critical core warrants explicit ownership even if the glob above
+# already covers it — it documents intent and survives future rule changes.
+/interlock/ledger.py            @dennisbiber
+/interlock/pipeline.py          @dennisbiber
+/interlock/service.py           @dennisbiber
+/interlock/wire.py              @dennisbiber
+/interlock/authorizers/         @dennisbiber
+/interlock/adapters/            @dennisbiber
+/.github/                       @dennisbiber
+/SECURITY.md                    @dennisbiber

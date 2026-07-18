@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: the token can read the repo and nothing else.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    name: python
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install (no runtime deps)
+        run: pip install -e .
+      - name: Unit tests
+        run: python -m unittest discover -v
+        # The cross-language e2e test skips here (no Node); it runs in its own job.
+
+  js-tests:
+    name: js
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Adapter tests
+        working-directory: interlock/adapters/openclaw
+        run: node --test
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -e .
+      - name: Cross-language e2e (real PDP <-> real PEP over a real unix socket)
+        run: python -m unittest tests.test_e2e_openclaw -v
+
+  deps:
+    name: zero-runtime-deps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Enforce stdlib-only runtime
+        run: python scripts/check_no_runtime_deps.py
+
+  lint:
+    name: lint + types (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: ruff
+        continue-on-error: true
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: mypy
+        continue-on-error: true
+        run: mypy interlock
+        # Advisory until the codebase is brought to full lint/type conformance.
+        # Promote to required (remove continue-on-error) once green.
