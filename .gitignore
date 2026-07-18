@@ -1,6 +1,29 @@
+# Python bytecode / packaging
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
+dist/
 .venv/
-state_sessions/
+venv/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node
 node_modules/
+
+# interlock RUNTIME ARTIFACTS — never commit these.
+# The audit log and the ledger's session state are operational records that can
+# carry tool names, arguments and session ids from real runs. The socket is a
+# live filesystem object. Committing any of them leaks operational data and, in
+# the ledger's case, would ship stale grant state into someone else's checkout.
+audit.jsonl
+*.sock
+state/
+state_sessions/
+
+# OS noise
+.DS_Store
