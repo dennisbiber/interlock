@@ -160,10 +160,15 @@ class TestShippedPolicy(unittest.TestCase):
 
     def test_policy_file_loads(self):
         policy = Policy.from_file(self.policy_path)
-        self.assertEqual(policy.classify("delete_email"), ("email:send", False))
+        # delete_email is classified by what it DOES (email:delete), not by the
+        # adjacent-sounding email:send. Effect names are the capability
+        # vocabulary grants are minted against, so a wrong name here would mint
+        # the wrong capability.
+        self.assertEqual(policy.classify("delete_email"), ("email:delete", False))
         self.assertEqual(policy.classify("list_inbox"), ("read", True))
         self.assertEqual(policy.classify("unknown_tool"), ("unknown_tool", False))
         self.assertEqual(policy.project_scope("delete_email", {"id": 9, "z": 1}), {"id": 9})
+        self.assertEqual(policy.elevation_for("email:delete"), "HumanApprover")
         self.assertEqual(policy.elevation_for("email:send"), "HumanApprover")
         self.assertEqual(policy.elevation_for("fs:delete"), "HumanApprover")  # via default
 
