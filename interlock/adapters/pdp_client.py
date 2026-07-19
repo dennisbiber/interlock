@@ -123,6 +123,11 @@ class PepOutcome:
     #: The raw wire elevation object on HOLD, so a shim can render a richer
     #: prompt than `reason` if its harness supports one.
     elevation: Optional[dict] = None
+    #: The grant consumed to reach ALLOW, when the PDP reported one. Exists so a
+    #: shim can log "proceeded under grant X" and correlate with the PDP audit
+    #: trail WITHOUT reaching past this outcome for the raw verdict. That is the
+    #: whole reason it is a named field: the seam does its job by being narrow.
+    grant_id: Optional[str] = None
 
 
 class _UnixHTTPConnection(http.client.HTTPConnection):
@@ -281,10 +286,12 @@ def decide(client: PdpClient, call: ToolCall) -> PepOutcome:
 
         if decision == _ALLOW:
             modified = verdict.get("modified_args")
+            grant_id = verdict.get("grant_id")
             return PepOutcome(
                 permit=True,
                 decision=_ALLOW,
                 modified_args=modified if isinstance(modified, dict) else None,
+                grant_id=grant_id if isinstance(grant_id, str) else None,
             )
         if decision == _DENY:
             reason = verdict.get("reason")

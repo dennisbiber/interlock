@@ -266,6 +266,8 @@ def load_callable(spec: str):
     module_name, sep, attr = spec.partition(":")
     if not sep or not module_name or not attr:
         raise ValueError(f"rule must be 'module:callable', got {spec!r}")
+    # dynamic-import: operator-supplied authorizer path from config, resolved
+    # at startup. Not a package dependency; interlock runs without it.
     fn = getattr(importlib.import_module(module_name), attr)
     if not callable(fn):
         raise TypeError(f"{spec!r} is not callable")
