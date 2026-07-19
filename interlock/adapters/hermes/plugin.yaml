@@ -1,0 +1,11 @@
+name: interlock
+version: "0.1.0"
+description: >
+  Deterministic policy enforcement for tool calls. Every call is evaluated by
+  the interlock PDP over a local unix socket; nothing executes without an
+  unforgeable single-use grant. Fail-closed: an unreachable PDP, a malformed
+  verdict, or an internal error all DENY. Registers in a deny-everything
+  posture and only arms after proving the hook actually enforces.
+author: "Dennis Biber"
+hooks:
+  - pre_tool_call
