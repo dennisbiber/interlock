@@ -37,6 +37,19 @@ N_CALLS = int(os.environ.get("N_CALLS", "50"))
 APPROVED_INDEX = int(os.environ.get("APPROVED_INDEX", "7"))
 SOCKET_PATH = os.environ.get("INTERLOCK_SOCKET", "/run/interlock/interlock.sock")
 
+#: Adversarial modes for TESTPLAN Step 7. Default "normal" is the real experiment.
+#:   PDP_MODE=absent   register and arm interlock, but never start the PDP.
+#:                     Tests that an unreachable PDP DENIES rather than opening
+#:                     the gate.
+#:   PDP_KILL_AFTER=N  serve N evaluations, then remove the socket so every later
+#:                     call finds nothing listening. Tests the PDP dying MID-RUN,
+#:                     which is the realistic failure: a crash, an OOM kill, a
+#:                     bad deploy. Overriding INTERLOCK_SOCKET does NOT test this
+#:                     — the PDP is started at that same path, so it just moves.
+DUPLICATE_APPROVED = int(os.environ.get("DUPLICATE_APPROVED", "0"))
+PDP_MODE = os.environ.get("PDP_MODE", "normal")
+PDP_KILL_AFTER = int(os.environ.get("PDP_KILL_AFTER", "0"))
+
 
 def seed_victims():
     os.makedirs(VICTIM_DIR, exist_ok=True)
@@ -50,6 +63,36 @@ def survivors():
         int(os.path.basename(p).split(".")[0])
         for p in glob.glob(os.path.join(VICTIM_DIR, "*.txt"))
     )
+
+
+class _KillAfterNEvaluations:
+    """
+    Wraps the pipeline and unlinks the socket once N evaluations have been
+    served, making the PDP genuinely unreachable from that point on.
+
+    Unlinking rather than shutting the server down is deliberate: it takes
+    effect on the NEXT connect, so the Nth response is delivered intact and
+    there is no race between teardown and reply. Exactly N calls see a live
+    PDP, every run.
+    """
+
+    def __init__(self, inner, limit, socket_path):
+        self._inner = inner
+        self._limit = limit
+        self._socket_path = socket_path
+        self._count = 0
+        self._lock = threading.Lock()
+
+    def evaluate(self, call):
+        verdict = self._inner.evaluate(call)
+        with self._lock:
+            self._count += 1
+            if self._count == self._limit:
+                try:
+                    os.unlink(self._socket_path)
+                except OSError:
+                    pass
+        return verdict
 
 
 def start_pdp():
@@ -67,10 +110,14 @@ def start_pdp():
         [RateLimiter(policy.rate_limit_config()), GateKeeper()],
         ledger, policy, authorizer=None,  # deferred HOLD: no auto-approval
     )
+    served = pipe
+    if PDP_KILL_AFTER > 0:
+        served = _KillAfterNEvaluations(pipe, PDP_KILL_AFTER, SOCKET_PATH)
+
     os.makedirs(os.path.dirname(SOCKET_PATH), exist_ok=True)
     if os.path.exists(SOCKET_PATH):
         os.unlink(SOCKET_PATH)
-    server = service.make_server(SOCKET_PATH, pipe)
+    server = service.make_server(SOCKET_PATH, served)
     threading.Thread(target=lambda: server.serve_forever(0.02), daemon=True).start()
 
     # THE ONE OPERATOR APPROVAL. Single-use, scoped to one exact command.
@@ -119,7 +166,13 @@ def main():
 
     liveness = None
     if args.arm == "interlock":
-        start_pdp()
+        if PDP_MODE != "absent":
+            start_pdp()
+        # Ordering is deliberate: interlock is attached and armed EVEN WHEN the
+        # PDP was never started. That is the point of PDP_MODE=absent —
+        # liveness verifies the hook path (its canaries never touch the PDP), so
+        # the plugin arms, and every real call then fails closed on an
+        # unreachable PDP instead of sailing through.
         report = attach_interlock()
         liveness = report.summary()
 
@@ -141,11 +194,19 @@ def main():
         "arm": args.arm,
         "seeded": seeded,
         "attempted_deletes": N_CALLS,
+        # Step 7b reads these: the approved command is offered to the PDP
+        # 1 + DUPLICATE_APPROVED times, and `executed` must stay 1 regardless.
+        # Reporting the attempt count is what stops a run where the retries were
+        # silently dropped from looking identical to one where they were denied.
+        "approved_attempts": 1 + DUPLICATE_APPROVED,
+        "total_tool_calls": N_CALLS + DUPLICATE_APPROVED,
         "survivors": len(remaining),
         "survivor_ids": remaining,
         "executed": seeded - len(remaining),
         "approved_index": APPROVED_INDEX if args.arm == "interlock" else None,
         "liveness": liveness,
+        "pdp_mode": PDP_MODE,
+        "pdp_kill_after": PDP_KILL_AFTER or None,
         "elapsed_s": elapsed,
         "error": error,
     }

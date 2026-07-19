@@ -70,3 +70,69 @@ class TestToolCallScript(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRetryCalls(unittest.TestCase):
+    """
+    Step 7b needs the approved command attempted more than once, and each
+    attempt must be ALONE IN ITS OWN TURN.
+
+    hermes-agent's run_agent._deduplicate_tool_calls removes duplicate
+    (tool_name, arguments) pairs within a single turn. Retries batched together
+    are stripped before dispatch and never reach the PDP, so the run looks
+    exactly like a normal one and the double-spend check silently proves
+    nothing. That is how the first version of this check passed while testing
+    nothing at all.
+    """
+
+    def test_first_turn_is_one_call_per_victim(self):
+        calls = stub_model.tool_calls()
+        self.assertEqual(len(calls), stub_model.N_CALLS)
+        approved = f"{stub_model.VICTIM_DIR}/{stub_model.APPROVED_INDEX}.txt"
+        targeting = [
+            c for c in calls
+            if json.loads(c["function"]["arguments"])["command"].endswith(approved)
+        ]
+        self.assertEqual(len(targeting), 1, "the approved path appears once in turn 1")
+
+    def test_each_retry_is_alone_in_its_turn(self):
+        for attempt in (1, 2, 3):
+            with self.subTest(attempt=attempt):
+                calls = stub_model.retry_call(attempt)
+                self.assertEqual(
+                    len(calls), 1,
+                    "batching retries would trip Hermes's within-turn dedup")
+
+    def test_retries_target_the_approved_command_exactly(self):
+        approved_cmd = json.loads(
+            stub_model.tool_calls()[stub_model.APPROVED_INDEX]["function"]["arguments"]
+        )["command"]
+        retry_cmd = json.loads(
+            stub_model.retry_call(1)[0]["function"]["arguments"]
+        )["command"]
+        # Byte-identical, or the grant's scope would not match and the retry
+        # would be denied for the wrong reason.
+        self.assertEqual(retry_cmd, approved_cmd)
+
+    def test_retry_ids_are_distinct(self):
+        ids = {stub_model.retry_call(n)[0]["id"] for n in range(1, 6)}
+        self.assertEqual(len(ids), 5)
+
+
+class TestTurnSelection(unittest.TestCase):
+
+    def test_batch_count_tracks_assistant_tool_turns(self):
+        self.assertEqual(stub_model.dispatched_batches({"messages": [{"role": "user"}]}), 0)
+        self.assertEqual(stub_model.dispatched_batches({"messages": [
+            {"role": "assistant", "tool_calls": [{"id": "a"}]},
+            {"role": "tool", "content": "{}"},
+        ]}), 1)
+        self.assertEqual(stub_model.dispatched_batches({"messages": [
+            {"role": "assistant", "tool_calls": [{"id": "a"}]},
+            {"role": "tool", "content": "{}"},
+            {"role": "assistant", "tool_calls": [{"id": "b"}]},
+            {"role": "tool", "content": "{}"},
+        ]}), 2)
+
+    def test_zero_duplicates_is_the_default_shape(self):
+        self.assertEqual(stub_model.DUPLICATE_APPROVED, 0)

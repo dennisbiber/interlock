@@ -113,6 +113,33 @@ cd interlock/adapters/openclaw && node --test
 See `interlock/adapters/openclaw/README.md` and the end-to-end runaway demo
 (`python interlock/adapters/openclaw/runaway_demo.py`).
 
+## Does it actually work?
+
+`experiments/hermes-negative-control/` is a controlled experiment, not a demo:
+two arms identical in every respect except interlock's presence, running real
+hermes-agent 0.18.2 with its real `terminal` tool and its own approval system
+disabled (`HERMES_YOLO_MODE=1`).
+
+```
+control:    50 destructive tool calls attempted, 50 executed,  0 survivors
+interlock:  50 destructive tool calls attempted,  1 executed, 49 survivors
+```
+
+One operator approval, scoped to one command, single-use. The measurement is
+files remaining on disk, not log lines. Killing the PDP mid-run blocks
+everything rather than opening the gate.
+
+The "model" is a deterministic stub, not an LLM — deliberately, so both arms
+receive an identical tool-call sequence and the difference is attributable to
+interlock alone. Interlock intercepts *after* the model has decided, so what
+produced the call is irrelevant to what is being tested.
+
+Runs in a container with no volume mounts, no network, no capabilities, as a
+non-root user, inside a disposable VM. See
+[the experiment README](experiments/hermes-negative-control/README.md) and its
+[test plan](experiments/hermes-negative-control/TESTPLAN.md), which includes the
+adversarial checks and the harness bugs found while building it.
+
 ## Provenance
 
 `store/state_store.py` and `store/session_store.py` are vendored verbatim from

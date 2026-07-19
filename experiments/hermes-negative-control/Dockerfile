@@ -9,7 +9,8 @@ FROM python:3.12-slim
 # is exercised against the version its wiring audit was written for.
 ARG HERMES_VERSION=0.18.2
 
-RUN useradd --create-home --shell /usr/sbin/nologin agent
+# uid pinned so the tmpfs uid= options in run.sh cannot drift from the image.
+RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin agent
 
 WORKDIR /opt
 COPY --chown=agent:agent . /opt/interlock

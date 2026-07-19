@@ -116,22 +116,99 @@ require_isolation() {
 
 # ------------------------------------------------------------------ running
 
+# The image's `chown agent:agent /victim ...` does NOT survive to runtime: a
+# --tmpfs mount lays a fresh, root-owned tmpfs OVER that directory and the
+# chown is mounted away. Every tmpfs must therefore carry the agent's uid/gid
+# explicitly, or the container runs as uid 1000 against root-owned mounts and
+# dies with PermissionError on the first write.
+#
+# The uid is read out of the image rather than hardcoded, so this keeps working
+# if the base image ever assigns the agent a different one.
+agent_ids() {
+  local uid
+  uid="$("$ENGINE" run --rm --entrypoint id "$IMAGE" -u 2>/dev/null || true)"
+  case "$uid" in
+    ''|*[!0-9]*) uid=1000 ;;   # image not built yet, or unexpected output
+  esac
+  echo "$uid"
+}
+
+# Experiment knobs forwarded into the container when set in your shell. Keeps
+# the Step 7 adversarial checks to one line each instead of a 12-flag docker
+# invocation, which is where mistakes get made.
+PASSTHROUGH_ENV="N_CALLS APPROVED_INDEX PDP_MODE PDP_KILL_AFTER DUPLICATE_APPROVED"
+
+# The experiment's payload — run_arm.py, stub_model.py, policy.json — is BAKED
+# INTO THE IMAGE by `COPY . /opt/interlock`. Editing them on the host changes
+# nothing until you rebuild. That failure is silent and, worse, flattering: the
+# container happily runs the previous experiment and prints a plausible RESULT,
+# so an adversarial check can appear to pass while never having run.
+#
+# Compare the payload in the image against the payload on disk and refuse when
+# they differ.
+PAYLOAD_FILES="run_arm.py stub_model.py policy.json"
+
+payload_hash_local() {
+  ( cd "${REPO_ROOT}/experiments/hermes-negative-control" \
+    && cat $PAYLOAD_FILES 2>/dev/null | sha256sum | cut -d" " -f1 )
+}
+
+payload_hash_image() {
+  "$ENGINE" run --rm --entrypoint sh "$IMAGE" \
+    -c "cat $PAYLOAD_FILES 2>/dev/null | sha256sum | cut -d' ' -f1" 2>/dev/null \
+    | tr -d "\r\n"
+}
+
+require_fresh_image() {
+  local want have
+  want="$(payload_hash_local)"
+  have="$(payload_hash_image)"
+  [ -z "$want" ] && return 0            # cannot read source; do not block
+  [ -z "$have" ] && return 0            # image missing; build will fail loudly
+  [ "$want" = "$have" ] && return 0
+
+  echo >&2
+  echo "======================================================================" >&2
+  echo "STALE IMAGE: the experiment code on disk does not match the image." >&2
+  echo >&2
+  echo "  on disk : $want" >&2
+  echo "  in image: $have" >&2
+  echo >&2
+  echo "  run_arm.py / stub_model.py / policy.json are COPIED INTO the image at" >&2
+  echo "  build time. Your edits are not running. Any result printed now would" >&2
+  echo "  describe the PREVIOUS version of the experiment." >&2
+  echo >&2
+  echo "  Fix:  ./experiments/hermes-negative-control/run.sh build" >&2
+  echo >&2
+  echo "  (override with INTERLOCK_SKIP_FRESHNESS=1 if you know why)" >&2
+  echo "======================================================================" >&2
+  exit 75   # EX_TEMPFAIL
+}
+
 run_arm() {
-  local runtime_flag=()
+  local runtime_flag=() env_flags=() uid var
+  [ "${INTERLOCK_SKIP_FRESHNESS:-}" = "1" ] || require_fresh_image
   [ -n "$RUNTIME" ] && runtime_flag=(--runtime "$RUNTIME")
+  uid="$(agent_ids)"
+  for var in $PASSTHROUGH_ENV; do
+    if [ -n "${!var:-}" ]; then
+      env_flags+=(-e "${var}=${!var}")
+    fi
+  done
 
   "$ENGINE" run --rm \
     "${runtime_flag[@]}" \
+    "${env_flags[@]}" \
     --network none \
     --read-only \
     --cap-drop ALL \
     --security-opt no-new-privileges \
     --pids-limit 256 \
     --memory 2g \
-    --tmpfs /victim:rw,size=16m \
-    --tmpfs /run/interlock:rw,size=1m \
-    --tmpfs /home/agent/.hermes:rw,size=256m \
-    --tmpfs /tmp:rw,size=64m \
+    --tmpfs "/victim:rw,size=16m,uid=${uid},gid=${uid},mode=0700" \
+    --tmpfs "/run/interlock:rw,size=1m,uid=${uid},gid=${uid},mode=0700" \
+    --tmpfs "/home/agent/.hermes:rw,size=256m,uid=${uid},gid=${uid},mode=0700" \
+    --tmpfs "/tmp:rw,size=64m,uid=${uid},gid=${uid},mode=0700" \
     "$IMAGE" --arm "$1" --json
 }
 

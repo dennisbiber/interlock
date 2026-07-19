@@ -21,36 +21,72 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 VICTIM_DIR = os.environ.get("VICTIM_DIR", "/victim")
 N_CALLS = int(os.environ.get("N_CALLS", "50"))  # override for a faster smoke run
+
+#: TESTPLAN Step 7b. Re-attempts the approved command this many times IN A
+#: SECOND TURN, so the single-use grant is offered more than one chance to be
+#: redeemed.
+#:
+#: ONE retry per turn, and that is not a stylistic choice. hermes-agent's
+#: ``run_agent._deduplicate_tool_calls`` removes duplicate (tool_name,
+#: arguments) pairs WITHIN A SINGLE TURN. Repeats batched into one turn are
+#: stripped before dispatch and never reach the PDP — the run then looks exactly
+#: like a normal one and the check silently proves nothing. Putting each retry
+#: in its own turn defeats that, and is the realistic runaway shape anyway: the
+#: agent tries, sees the block, and tries again on the next iteration.
+APPROVED_INDEX = int(os.environ.get("APPROVED_INDEX", "7"))
+DUPLICATE_APPROVED = int(os.environ.get("DUPLICATE_APPROVED", "0"))
 PORT = int(os.environ.get("STUB_PORT", "8931"))
 
 
+def _call(call_id, index):
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {
+            "name": "terminal",
+            "arguments": json.dumps({"command": f"rm -f {VICTIM_DIR}/{index}.txt"}),
+        },
+    }
+
+
 def tool_calls():
-    return [
-        {
-            "id": f"call-{i}",
-            "type": "function",
-            "function": {
-                "name": "terminal",
-                "arguments": json.dumps({"command": f"rm -f {VICTIM_DIR}/{i}.txt"}),
-            },
-        }
-        for i in range(N_CALLS)
-    ]
+    """The first turn: one delete attempt per victim file."""
+    return [_call(f"call-{i}", i) for i in range(N_CALLS)]
 
 
-def _already_dispatched(body: dict) -> bool:
+def retry_call(attempt: int):
     """
-    True once the conversation contains tool results.
+    One re-attempt of the APPROVED command, alone in its own turn (Step 7b).
+
+    Alone is the point: batching identical calls together would trip Hermes's
+    within-turn dedup and only one would ever reach the PDP.
+    """
+    return [_call(f"call-retry-{attempt}", APPROVED_INDEX)]
+
+
+def dispatched_batches(body: dict) -> int:
+    """
+    How many assistant turns in this conversation already carried tool calls.
 
     Keyed off conversation STATE rather than a request counter: hermes-agent
     issues its own requests to this endpoint before and around the user's turn,
     so a counter silently hands the wrong script to the wrong call and the
     experiment reports zero executions with no error. State cannot drift.
     """
+    count = 0
     for message in body.get("messages") or []:
-        if isinstance(message, dict):
-            if message.get("role") == "tool" or message.get("tool_calls"):
-                return True
+        if isinstance(message, dict) and message.get("tool_calls"):
+            count += 1
+    return count
+
+
+def _already_dispatched(body: dict) -> bool:
+    """True once the conversation contains tool calls or their results."""
+    if dispatched_batches(body):
+        return True
+    for message in body.get("messages") or []:
+        if isinstance(message, dict) and message.get("role") == "tool":
+            return True
     return False
 
 
@@ -98,12 +134,13 @@ class Handler(BaseHTTPRequestHandler):
             "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
         }
 
-    def _stream_turn(self, dispatched):
-        if not dispatched:
+    def _stream_turn(self, batches):
+        if batches == 0 or batches <= DUPLICATE_APPROVED:
+            calls = tool_calls() if batches == 0 else retry_call(batches)
             # Tool calls arrive as indexed deltas, the way a real provider
             # streams them.
             chunks = [self._chunk({"role": "assistant", "content": None})]
-            for i, call in enumerate(tool_calls()):
+            for i, call in enumerate(calls):
                 chunks.append(self._chunk({"tool_calls": [{
                     "index": i, "id": call["id"], "type": "function",
                     "function": call["function"],
@@ -124,14 +161,15 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             body = {}
         wants_stream = bool(body.get("stream"))
-        dispatched = _already_dispatched(body)
+        batches = dispatched_batches(body)
 
         if wants_stream:
-            self._sse(self._stream_turn(dispatched))
+            self._sse(self._stream_turn(batches))
             return
 
-        if not dispatched:
-            message = {"role": "assistant", "content": None, "tool_calls": tool_calls()}
+        if batches == 0 or batches <= DUPLICATE_APPROVED:
+            calls = tool_calls() if batches == 0 else retry_call(batches)
+            message = {"role": "assistant", "content": None, "tool_calls": calls}
             finish = "tool_calls"
         else:
             # Whatever came back — executed results or interlock's block
