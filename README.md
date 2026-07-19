@@ -123,11 +123,18 @@ disabled (`HERMES_YOLO_MODE=1`).
 ```
 control:    50 destructive tool calls attempted, 50 executed,  0 survivors
 interlock:  50 destructive tool calls attempted,  1 executed, 49 survivors
+approval:   50 destructive tool calls attempted,  1 executed, 49 survivors
+            (human prompted 50x, approved 1x, declined 49x)
 ```
 
-One operator approval, scoped to one command, single-use. The measurement is
-files remaining on disk, not log lines. Killing the PDP mid-run blocks
-everything rather than opening the gate.
+The third arm is the sudo loop end to end: no grant exists when the agent
+starts, the PDP holds each call, a human is shown the elevation prompt, and the
+one they approve executes inside that same tool call. Decline everything and
+nothing runs. Let the agent retry the approved command and the human is
+re-prompted each time — one yes buys exactly one action.
+
+The measurement is files remaining on disk, not log lines. Killing the PDP
+mid-run blocks everything rather than opening the gate.
 
 The "model" is a deterministic stub, not an LLM — deliberately, so both arms
 receive an identical tool-call sequence and the difference is attributable to
