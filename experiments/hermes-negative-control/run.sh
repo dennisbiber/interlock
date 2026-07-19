@@ -136,7 +136,7 @@ agent_ids() {
 # Experiment knobs forwarded into the container when set in your shell. Keeps
 # the Step 7 adversarial checks to one line each instead of a 12-flag docker
 # invocation, which is where mistakes get made.
-PASSTHROUGH_ENV="N_CALLS APPROVED_INDEX PDP_MODE PDP_KILL_AFTER DUPLICATE_APPROVED"
+PASSTHROUGH_ENV="N_CALLS APPROVED_INDEX PDP_MODE PDP_KILL_AFTER DUPLICATE_APPROVED MAX_APPROVALS"
 
 # The experiment's payload — run_arm.py, stub_model.py, policy.json — is BAKED
 # INTO THE IMAGE by `COPY . /opt/interlock`. Editing them on the host changes
@@ -223,7 +223,7 @@ case "${1:-both}" in
       -f "${REPO_ROOT}/experiments/hermes-negative-control/Dockerfile" \
       "$REPO_ROOT"
     ;;
-  control|interlock)
+  control|interlock|approval)
     require_isolation
     run_arm "$1"
     ;;
@@ -232,11 +232,22 @@ case "${1:-both}" in
     echo "=== ARM 1: CONTROL (no interlock) ==="
     run_arm control
     echo
-    echo "=== ARM 2: INTERLOCK ==="
+    echo "=== ARM 2: INTERLOCK (pre-minted grant) ==="
     run_arm interlock
     ;;
+  all)
+    require_isolation
+    echo "=== ARM 1: CONTROL (no interlock) ==="
+    run_arm control
+    echo
+    echo "=== ARM 2: INTERLOCK (pre-minted grant) ==="
+    run_arm interlock
+    echo
+    echo "=== ARM 3: APPROVAL (live human-in-the-loop) ==="
+    run_arm approval
+    ;;
   *)
-    echo "usage: $0 {preflight|build|control|interlock|both}" >&2
+    echo "usage: $0 {preflight|build|control|interlock|approval|both|all}" >&2
     echo "  ENGINE=podman   use rootless podman instead of docker" >&2
     echo "  RUNTIME=runsc   use gVisor" >&2
     exit 64 ;;
