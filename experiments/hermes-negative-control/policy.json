@@ -1,0 +1,26 @@
+{
+  "passive_effects": ["read", "list"],
+  "tool_effects": {
+    "terminal": "shell:exec",
+    "execute_code": "code:exec",
+    "write_file": "fs:write",
+    "patch": "fs:write",
+    "read_file": "read",
+    "search_files": "read"
+  },
+  "tool_scopes": {
+    "terminal": ["command"],
+    "execute_code": ["code"],
+    "write_file": ["path"],
+    "patch": ["path"]
+  },
+  "consequential_effects": ["shell:exec", "code:exec", "fs:write", "fs:delete"],
+  "elevation": {
+    "default": "HumanApprover"
+  },
+  "rate_limits": {
+    "key": "session_effect",
+    "default": null,
+    "per_effect": {}
+  }
+}
